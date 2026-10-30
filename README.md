@@ -6,7 +6,7 @@ CodeCortex Network (CCN) is an early-stage service for discovering repositories 
 
 - FastAPI endpoints: `GET /health`, `GET /status`, `POST /scout/run`, `GET /scout/latest`, and read-only paginated `GET /repositories`, `/relationships`, and `/evidence` routes over the latest snapshot.
 - Typed repository, evidence, relationship, and agent-run models.
-- A bounded, read-only GitHub Scout. It fetches the configured seed repository, searches at most the configured number of its topics, deduplicates repositories case-insensitively, and caps the result count.
+- A bounded, read-only GitHub Scout. It fetches the configured seed repository, optionally collects a bounded page of direct forks, then searches at most the configured number of its topics. Repositories are deduplicated case-insensitively and the total result count stays within its configured cap.
 - Evidence records retain the source URL, collection time, source type, and original GitHub API payload.
 - Per-process GitHub request pacing for the core and search quotas, one rate-limit-aware retry, and optional token authentication.
 - Optional durable storage as versioned JSON run files in a dedicated GitHub repository, with `latest.json` updated using optimistic concurrency.
@@ -28,7 +28,7 @@ uvicorn ccn.main:app --reload
 
 Open `http://127.0.0.1:8000/docs` for the API interface. `POST /scout/run` starts a bounded collection. No GitHub token is required, but unauthenticated API access has a lower GitHub rate limit. Set `GITHUB_TOKEN` in the environment or a local, untracked `.env` file to authenticate. Never commit tokens.
 
-Configuration variables are listed in `.env.example`. Repository and query limits are validated and have hard upper bounds. `CCN_REQUESTS_PER_MINUTE` defaults to 30 and cannot exceed 60; additional per-process guards stay below GitHub's published hourly core and per-minute search quotas. Set `CCN_STORAGE_REPOSITORY=owner/private-repo` and `CCN_STORAGE_BRANCH=main` to enable durable storage. No repo is created automatically.
+Configuration variables are listed in `.env.example`. Repository and query limits are validated and have hard upper bounds. `CCN_MAX_SEED_FORKS` defaults to 10 and is capped at 50; set it to 0 to disable fork discovery. `CCN_REQUESTS_PER_MINUTE` defaults to 30 and cannot exceed 60; additional per-process guards stay below GitHub's published hourly core and per-minute search quotas. Set `CCN_STORAGE_REPOSITORY=owner/private-repo` and `CCN_STORAGE_BRANCH=main` to enable durable storage. No repo is created automatically.
 
 ## Verify
 

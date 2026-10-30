@@ -4,9 +4,9 @@
 
 The service is a Python 3.11+ FastAPI application. `ccn.main` exposes health/status routes, runs an on-demand Scout, and provides read-only routes for browsing the latest snapshot. API responses use Pydantic models defined in `ccn.models`.
 
-`GitHubScout` fetches one configured seed repository, then performs at most `CCN_MAX_SEARCH_QUERIES` searches, one per seed topic. The total unique result set, including the seed, is capped by `CCN_MAX_REPOSITORIES`. Repositories are deduplicated by lowercase `owner/name`. Search results are ranked by stars by GitHub; this is a discovery convenience, not a quality score.
+`GitHubScout` fetches one configured seed repository, then at most one first-page request for its direct forks, then performs at most `CCN_MAX_SEARCH_QUERIES` searches, one per seed topic. Fork results are capped by `CCN_MAX_SEED_FORKS` (default 10, maximum 50). The total unique result set, including the seed, is capped by `CCN_MAX_REPOSITORIES`; capacity used by forks reduces the remaining capacity for topic search. Repositories are deduplicated by lowercase `owner/name`. Search results are ranked by stars by GitHub; this is a discovery convenience, not a quality score.
 
-Each seed or discovered repository has an Evidence record with the GitHub source URL, UTC collection timestamp, source type, and original response payload. Relationships currently mean either the seed marker or a shared topic surfaced by a seed-topic search. The evidence IDs are attached to relationships so consumers can trace why a relationship exists.
+Each seed or discovered repository has an Evidence record with the GitHub source URL, UTC collection timestamp, source type, and original response payload. Relationships include the seed marker, a direct `fork_of` edge from each discovered fork to the seed, or a `shared_topic` edge from the seed to a repository surfaced by a seed-topic search. Fork evidence records the seed's `/forks` endpoint, request parameters, and fork payload under source `seed_forks`; topic discoveries use `topic_search`. Evidence IDs are attached to relationships so consumers can trace why a relationship exists.
 
 `GitHubClient` uses only GitHub REST GET requests. It sends the documented API version header, uses optional `GITHUB_TOKEN` authentication, and shares sliding-window limiters across calls handled by one API process. In addition to the configurable overall per-minute cap (maximum 60), conservative guards stay below GitHub's published primary hourly core quota and search quota: 55 core requests per hour and 9 searches per minute without a token, or 4,500 core requests per hour and 30 searches per minute with one. These per-process guards do not account for requests made by other applications using the same IP or token. On a rate-limit response, the client waits according to GitHub's retry/reset headers, or at least one minute for a secondary rate limit, then retries once. Failures are surfaced as an API 502. The API request timeout is configurable.
 
@@ -25,6 +25,7 @@ The snapshot store is append-oriented and does not provide indexed graph queries
 - Indexed graph queries and normalized storage for larger datasets.
 - Incremental scans, scheduled runs, and explicit run lifecycle/status tracking for failures.
 - Additional discovery sources and relationship types with provenance.
+- Additional bounded graph expansion beyond direct seed forks and seed-topic search.
 - Authentication, authorization, operational metrics, and deployment configuration.
 - Graph query and ranking interfaces.
 

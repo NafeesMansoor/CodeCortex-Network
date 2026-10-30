@@ -38,7 +38,7 @@ def _sample_result() -> ScoutResult:
                     "repository_full_name": "owner/seed",
                     "source_url": "https://api.github.com/repos/owner/seed",
                     "collected_at": "2026-01-01T00:00:00Z",
-                    "source": "seed_repository",
+                    "source": "repository_metadata",
                     "payload": {"id": 1},
                 },
                 {

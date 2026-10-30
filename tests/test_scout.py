@@ -26,8 +26,10 @@ def repo(full_name: str, repo_id: int, topics: list[str]) -> dict:
 
 
 class FakeGitHub:
-    def __init__(self) -> None:
+    def __init__(self, fork_payloads: list[dict] | None = None) -> None:
         self.searches: list[tuple[str, int]] = []
+        self.fork_calls: list[tuple[str, int]] = []
+        self.fork_payloads = fork_payloads or []
 
     async def repository(self, _: str) -> dict:
         return repo("owner/seed", 1, ["python", "agents"])
@@ -37,6 +39,10 @@ class FakeGitHub:
         if query == "topic:python":
             return [repo("owner/seed", 1, ["python"]), repo("other/one", 2, ["python"])]
         return [repo("other/one", 2, ["agents"]), repo("other/two", 3, ["agents"])]
+
+    async def repository_forks(self, full_name: str, per_page: int) -> list[dict]:
+        self.fork_calls.append((full_name, per_page))
+        return self.fork_payloads
 
 
 @pytest.mark.asyncio
@@ -50,7 +56,78 @@ async def test_scout_deduplicates_retains_evidence_and_obeys_limit() -> None:
     assert len(result.relationships) == 2
     assert result.run.repositories_seen == 2
     assert github.searches == [("topic:python", 1)]
+    assert github.fork_calls == [("owner/seed", 1)]
     assert result.evidence[0].payload["id"] == 1
+
+
+@pytest.mark.asyncio
+async def test_scout_discovers_bounded_direct_forks_with_provenance() -> None:
+    fork = repo("other/fork", 2, ["python"])
+    github = FakeGitHub([fork, fork])
+    settings = Settings(
+        seed_repository="owner/seed",
+        max_repositories=3,
+        max_seed_forks=2,
+        max_search_queries=2,
+    )
+
+    result = await GitHubScout(settings, github).run()  # type: ignore[arg-type]
+
+    assert [item.full_name for item in result.repositories] == [
+        "owner/seed",
+        "other/fork",
+        "other/one",
+    ]
+    assert github.fork_calls == [("owner/seed", 2)]
+    fork_relationships = [
+        item for item in result.relationships if item.kind.value == "fork_of"
+    ]
+    assert len(fork_relationships) == 1
+    fork_relationship = fork_relationships[0]
+    assert fork_relationship.source_repository == "other/fork"
+    assert fork_relationship.target_repository == "owner/seed"
+    fork_evidence = next(
+        item for item in result.evidence if item.id in fork_relationship.evidence_ids
+    )
+    assert fork_evidence.source == "seed_forks"
+    assert fork_evidence.repository_full_name == "other/fork"
+    assert str(fork_evidence.source_url).endswith(
+        "/repos/owner/seed/forks?per_page=2&sort=newest"
+    )
+    assert result.run.repositories_seen == len(result.repositories) == 3
+
+
+@pytest.mark.asyncio
+async def test_scout_skips_forks_when_repository_cap_is_reached() -> None:
+    github = FakeGitHub([repo("other/fork", 2, ["python"])])
+    settings = Settings(
+        seed_repository="owner/seed",
+        max_repositories=1,
+        max_seed_forks=50,
+        max_search_queries=0,
+    )
+
+    result = await GitHubScout(settings, github).run()  # type: ignore[arg-type]
+
+    assert [item.full_name for item in result.repositories] == ["owner/seed"]
+    assert github.fork_calls == []
+    assert github.searches == []
+
+
+@pytest.mark.asyncio
+async def test_scout_can_disable_fork_discovery() -> None:
+    github = FakeGitHub([repo("other/fork", 2, ["python"])])
+    settings = Settings(
+        seed_repository="owner/seed",
+        max_repositories=5,
+        max_seed_forks=0,
+        max_search_queries=0,
+    )
+
+    result = await GitHubScout(settings, github).run()  # type: ignore[arg-type]
+
+    assert [item.full_name for item in result.repositories] == ["owner/seed"]
+    assert github.fork_calls == []
 
 
 class FakeContentsClient:

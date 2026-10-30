@@ -109,6 +109,13 @@ class GitHubClient:
     async def repository(self, full_name: str) -> dict[str, Any]:
         return await self.get(f"/repos/{quote(full_name, safe='/')}")
 
+    async def repository_forks(self, full_name: str, per_page: int) -> list[dict[str, Any]]:
+        data = await self.get(
+            f"/repos/{quote(full_name, safe='/')}/forks",
+            {"per_page": str(per_page), "sort": "newest"},
+        )
+        return data
+
     async def search_repositories(self, query: str, per_page: int) -> list[dict[str, Any]]:
         data = await self.get(
             "/search/repositories",

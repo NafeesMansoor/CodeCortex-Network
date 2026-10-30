@@ -7,6 +7,7 @@ from ccn.models import (
     AgentRun,
     AgentRunStatus,
     Evidence,
+    EvidenceSource,
     Relationship,
     RelationshipKind,
     Repository,
@@ -41,7 +42,7 @@ class GitHubScout:
         seed = Repository.model_validate(seed_payload)
         repositories[seed.full_name.lower()] = seed
         seed_evidence = self._evidence(
-            seed, seed_payload, "/repos/" + seed.full_name, "repository_metadata"
+            seed, seed_payload, "/repos/" + seed.full_name, EvidenceSource.REPOSITORY_METADATA
         )
         evidence.append(seed_evidence)
         relationships.append(Relationship(
@@ -50,6 +51,32 @@ class GitHubScout:
             kind=RelationshipKind.SEED,
             evidence_ids=[seed_evidence.id],
         ))
+
+        # The forks endpoint makes one bounded core request and provides direct provenance.
+        fork_limit = min(
+            self.settings.max_seed_forks, self.settings.max_repositories - len(repositories)
+        )
+        if fork_limit > 0:
+            fork_payloads = await self.client.repository_forks(seed.full_name, fork_limit)
+            for payload in fork_payloads[:fork_limit]:
+                repository = Repository.model_validate(payload)
+                key = repository.full_name.casefold()
+                if key in repositories or len(repositories) >= self.settings.max_repositories:
+                    continue
+                repositories[key] = repository
+                fork_evidence = self._evidence(
+                    repository,
+                    payload,
+                    f"/repos/{seed.full_name}/forks?per_page={fork_limit}&sort=newest",
+                    EvidenceSource.SEED_FORKS,
+                )
+                evidence.append(fork_evidence)
+                relationships.append(Relationship(
+                    source_repository=repository.full_name,
+                    target_repository=seed.full_name,
+                    kind=RelationshipKind.FORK_OF,
+                    evidence_ids=[fork_evidence.id],
+                ))
 
         queries = [f"topic:{topic}" for topic in seed.topics[: self.settings.max_search_queries]]
         for query in queries:
@@ -64,7 +91,9 @@ class GitHubScout:
                     continue
                 repositories[key] = repository
                 source_url = f"/search/repositories?q={query}"
-                item_evidence = self._evidence(repository, payload, source_url, "topic_search")
+                item_evidence = self._evidence(
+                    repository, payload, source_url, EvidenceSource.TOPIC_SEARCH
+                )
                 evidence.append(item_evidence)
                 shared = sorted(set(seed.topics).intersection(repository.topics))
                 relationships.append(Relationship(
@@ -94,7 +123,7 @@ class GitHubScout:
         )
 
     def _evidence(
-        self, repository: Repository, payload: dict, path: str, source: str
+        self, repository: Repository, payload: dict, path: str, source: EvidenceSource
     ) -> Evidence:
         return Evidence(
             id=str(uuid4()),

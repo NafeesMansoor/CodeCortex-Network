@@ -16,11 +16,12 @@
 - [x] Add read-only paginated browse endpoints for repositories, relationships, and evidence in the latest snapshot.
 - [ ] Add indexed graph queries, incremental record-level updates, historical run browsing, and explicit retention policies.
 
-## Milestone 3 — Broader discovery (planned)
+## Milestone 3 — Broader discovery (partially implemented)
 
-- Add opt-in, bounded discovery strategies beyond seed topics.
-- Record discovery paths and support relationship confidence without hiding source evidence.
-- Add ranking and filtering with documented signals.
+- [x] Add bounded first-page discovery of direct seed forks, with configurable limits and typed `fork_of` relationships linked to source evidence.
+- [ ] Add opt-in, bounded discovery strategies beyond direct forks and seed topics.
+- [ ] Record multi-hop discovery paths and support relationship confidence without hiding source evidence.
+- [ ] Add ranking and filtering with documented signals.
 
 ## Milestone 4 — Operability (planned)
 

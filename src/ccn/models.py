@@ -20,18 +20,25 @@ class Repository(BaseModel):
     updated_at: datetime | None = None
 
 
+class EvidenceSource(StrEnum):
+    REPOSITORY_METADATA = "repository_metadata"
+    SEED_FORKS = "seed_forks"
+    TOPIC_SEARCH = "topic_search"
+
+
 class Evidence(BaseModel):
     id: str
     repository_full_name: str
     source_url: HttpUrl
     collected_at: datetime
-    source: str
+    source: EvidenceSource
     payload: dict[str, object]
 
 
 class RelationshipKind(StrEnum):
     SHARED_TOPIC = "shared_topic"
     SEED = "seed"
+    FORK_OF = "fork_of"
 
 
 class Relationship(BaseModel):
