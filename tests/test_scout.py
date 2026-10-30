@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import pytest
 
 from ccn.config import Settings
+from ccn.models import EvidenceSource, RelationshipKind
 from ccn.scout import GitHubScout
 from ccn.storage import GitHubSnapshotStore
 
@@ -43,6 +44,28 @@ class FakeGitHub:
     async def repository_forks(self, full_name: str, per_page: int) -> list[dict]:
         self.fork_calls.append((full_name, per_page))
         return self.fork_payloads
+
+
+class ExpansionGitHub(FakeGitHub):
+    async def repository(self, _: str) -> dict:
+        return repo("owner/seed", 1, ["starter", "other"])
+
+    async def search_repositories(self, query: str, per_page: int) -> list[dict]:
+        self.searches.append((query, per_page))
+        if query == "topic:starter":
+            return [repo("First/Project", 2, ["starter", "deep-topic"])]
+        if query == "topic:other":
+            return [
+                repo("first/project", 2, ["starter", "deep-topic"]),
+                repo("second/direct", 3, ["other", "deep-topic"]),
+            ]
+        if query == "topic:deep-topic":
+            return [
+                repo("OWNER/SEED", 1, ["starter", "other"]),
+                repo("first/project", 2, ["starter", "deep-topic"]),
+                repo("Second/Project", 4, ["deep-topic", "next-topic"]),
+            ]
+        return []
 
 
 @pytest.mark.asyncio
@@ -128,6 +151,58 @@ async def test_scout_can_disable_fork_discovery() -> None:
 
     assert [item.full_name for item in result.repositories] == ["owner/seed"]
     assert github.fork_calls == []
+
+
+@pytest.mark.asyncio
+async def test_scout_expands_a_capped_first_hop_with_global_query_budget_and_provenance() -> None:
+    github = ExpansionGitHub()
+    settings = Settings(
+        seed_repository="owner/seed",
+        max_repositories=6,
+        max_seed_forks=0,
+        max_search_queries=3,
+        max_expansion_seeds=1,
+        max_expansion_queries=1,
+    )
+
+    result = await GitHubScout(settings, github).run()  # type: ignore[arg-type]
+
+    names = [item.full_name for item in result.repositories]
+    assert names == ["owner/seed", "First/Project", "second/direct", "Second/Project"]
+    assert github.searches == [
+        ("topic:starter", 5),
+        ("topic:other", 4),
+        ("topic:deep-topic", 3),
+    ]
+    assert len(github.searches) == settings.max_search_queries
+
+    expansion_relationships = [
+        relationship
+        for relationship in result.relationships
+        if relationship.kind == RelationshipKind.DISCOVERED_VIA
+    ]
+    assert len(expansion_relationships) == 1
+    relationship = expansion_relationships[0]
+    assert relationship.source_repository == "First/Project"
+    assert relationship.target_repository == "Second/Project"
+    assert relationship.shared_topics == ["deep-topic"]
+    assert len(relationship.evidence_ids) == 2
+
+    expansion_evidence = next(
+        item
+        for item in result.evidence
+        if item.source == EvidenceSource.EXPANSION_TOPIC_SEARCH
+    )
+    assert expansion_evidence.repository_full_name == "Second/Project"
+    assert expansion_evidence.payload["id"] == 4
+    assert result.run.repositories_seen == 4
+
+
+def test_expansion_settings_require_both_caps_and_fit_global_query_budget() -> None:
+    with pytest.raises(ValueError, match="both be zero or both be positive"):
+        Settings(max_expansion_seeds=1)
+    with pytest.raises(ValueError, match="cannot exceed max_search_queries"):
+        Settings(max_search_queries=1, max_expansion_seeds=1, max_expansion_queries=2)
 
 
 class FakeContentsClient:

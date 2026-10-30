@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,11 +12,24 @@ class Settings(BaseSettings):
     max_repositories: int = Field(default=20, ge=1, le=100)
     max_seed_forks: int = Field(default=10, ge=0, le=50)
     max_search_queries: int = Field(default=5, ge=0, le=10)
+    max_expansion_seeds: int = Field(default=0, ge=0, le=5)
+    max_expansion_queries: int = Field(default=0, ge=0, le=10)
     requests_per_minute: int = Field(default=30, ge=1, le=60)
     request_timeout_seconds: float = Field(default=10, gt=0, le=60)
     github_api_url: str = "https://api.github.com"
     storage_repository: str | None = None
     storage_branch: str = "main"
+
+    @model_validator(mode="after")
+    def validate_expansion_limits(self) -> "Settings":
+        if bool(self.max_expansion_seeds) != bool(self.max_expansion_queries):
+            raise ValueError(
+                "max_expansion_seeds and max_expansion_queries must both be zero "
+                "or both be positive"
+            )
+        if self.max_expansion_queries > self.max_search_queries:
+            raise ValueError("max_expansion_queries cannot exceed max_search_queries")
+        return self
 
     @field_validator("seed_repository")
     @classmethod

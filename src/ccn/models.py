@@ -24,6 +24,7 @@ class EvidenceSource(StrEnum):
     REPOSITORY_METADATA = "repository_metadata"
     SEED_FORKS = "seed_forks"
     TOPIC_SEARCH = "topic_search"
+    EXPANSION_TOPIC_SEARCH = "expansion_topic_search"
 
 
 class Evidence(BaseModel):
@@ -39,6 +40,7 @@ class RelationshipKind(StrEnum):
     SHARED_TOPIC = "shared_topic"
     SEED = "seed"
     FORK_OF = "fork_of"
+    DISCOVERED_VIA = "discovered_via"
 
 
 class Relationship(BaseModel):
@@ -120,9 +122,26 @@ class RelationshipChange(BaseModel):
     after: Relationship | None = None
 
 
+class StarCountChange(BaseModel):
+    from_count: int
+    to_count: int
+    delta: int
+
+
+class StarComparisonSummary(BaseModel):
+    from_seed_repository: str
+    to_seed_repository: str
+    seed_stars: StarCountChange | None
+    discovered_set_stars: StarCountChange
+    matched_discovered_stars_delta: int
+    added_repositories_stars: int
+    removed_repositories_stars: int
+
+
 class RunComparison(BaseModel):
     from_run: AgentRun
     to_run: AgentRun
     repositories_added: list[Repository]
     repositories_removed: list[Repository]
     relationship_changes: list[RelationshipChange]
+    star_counts: StarComparisonSummary

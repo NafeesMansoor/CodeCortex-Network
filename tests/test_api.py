@@ -29,6 +29,7 @@ def _sample_result() -> ScoutResult:
                     "description": "Seed project",
                     "language": "Python",
                     "topics": ["agents", "network"],
+                    "stargazers_count": 100,
                 },
                 {
                     "id": 2,
@@ -37,6 +38,7 @@ def _sample_result() -> ScoutResult:
                     "description": "Agent helpers",
                     "language": "TypeScript",
                     "topics": ["agents"],
+                    "stargazers_count": 10,
                 },
             ],
             "evidence": [
@@ -106,7 +108,7 @@ def test_browse_endpoints_return_typed_paged_snapshot_records() -> None:
                     "description": "Seed project",
                     "language": "Python",
                     "topics": ["agents", "network"],
-                    "stargazers_count": 0,
+                    "stargazers_count": 100,
                     "forks_count": 0,
                     "archived": False,
                     "default_branch": "main",
@@ -156,6 +158,11 @@ def test_browse_endpoints_not_found_without_snapshot() -> None:
 
 def test_run_history_and_comparison_endpoints(monkeypatch) -> None:
     source = _sample_result()
+    source.repositories.append(
+        source.repositories[1].model_copy(
+            update={"id": 4, "full_name": "other/removed", "stargazers_count": 7}
+        )
+    )
     source.relationships.append(
         Relationship(
             source_repository="other/removed",
@@ -168,9 +175,10 @@ def test_run_history_and_comparison_endpoints(monkeypatch) -> None:
         update={"id": "00000000-0000-0000-0000-000000000002"}
     )
     target.repositories = [
-        source.repositories[0],
+        source.repositories[0].model_copy(update={"stargazers_count": 105}),
+        source.repositories[1].model_copy(update={"stargazers_count": 14}),
         source.repositories[1].model_copy(
-            update={"full_name": "other/new-agent", "id": 3}
+            update={"full_name": "other/new-agent", "id": 3, "stargazers_count": 20}
         ),
     ]
     target.relationships = [
@@ -233,11 +241,20 @@ def test_run_history_and_comparison_endpoints(monkeypatch) -> None:
             "other/new-agent"
         ]
         assert [item["full_name"] for item in body["repositories_removed"]] == [
-            "other/agent-kit"
+            "other/removed"
         ]
         changes = {item["change"]: item for item in body["relationship_changes"]}
         assert set(changes) == {"added", "removed", "updated"}
         assert changes["updated"]["after"]["shared_topics"] == ["agents", "tools"]
+        assert body["star_counts"] == {
+            "from_seed_repository": "owner/seed",
+            "to_seed_repository": "owner/seed",
+            "seed_stars": {"from_count": 100, "to_count": 105, "delta": 5},
+            "discovered_set_stars": {"from_count": 17, "to_count": 34, "delta": 17},
+            "matched_discovered_stars_delta": 4,
+            "added_repositories_stars": 20,
+            "removed_repositories_stars": 7,
+        }
 
 
 def test_history_requires_github_snapshot_storage() -> None:

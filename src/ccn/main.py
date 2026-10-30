@@ -18,6 +18,8 @@ from ccn.models import (
     RunComparison,
     RunHistoryPage,
     ScoutResult,
+    StarComparisonSummary,
+    StarCountChange,
 )
 from ccn.scout import GitHubScout
 from ccn.storage import GitHubSnapshotStore
@@ -87,6 +89,10 @@ def _relationship_signature(relationship: Relationship) -> tuple[str, ...]:
     return tuple(sorted(topic.casefold() for topic in relationship.shared_topics))
 
 
+def _star_count_change(from_count: int, to_count: int) -> StarCountChange:
+    return StarCountChange(from_count=from_count, to_count=to_count, delta=to_count - from_count)
+
+
 def _compare_runs(source: ScoutResult, target: ScoutResult) -> RunComparison:
     source_repositories = {repo.full_name.casefold(): repo for repo in source.repositories}
     target_repositories = {repo.full_name.casefold(): repo for repo in target.repositories}
@@ -120,12 +126,53 @@ def _compare_runs(source: ScoutResult, target: ScoutResult) -> RunComparison:
                 )
             )
 
+    source_seed_key = source.run.seed_repository.casefold()
+    target_seed_key = target.run.seed_repository.casefold()
+    seed_stars = None
+    if source_seed_key == target_seed_key:
+        from_seed = source_repositories.get(source_seed_key)
+        to_seed = target_repositories.get(target_seed_key)
+        if from_seed is not None and to_seed is not None:
+            seed_stars = _star_count_change(
+                from_seed.stargazers_count, to_seed.stargazers_count
+            )
+
+    source_discovered = {
+        key: repo for key, repo in source_repositories.items() if key != source_seed_key
+    }
+    target_discovered = {
+        key: repo for key, repo in target_repositories.items() if key != target_seed_key
+    }
+    common_discovered = source_discovered.keys() & target_discovered.keys()
+    star_counts = StarComparisonSummary(
+        from_seed_repository=source.run.seed_repository,
+        to_seed_repository=target.run.seed_repository,
+        seed_stars=seed_stars,
+        discovered_set_stars=_star_count_change(
+            sum(repo.stargazers_count for repo in source_discovered.values()),
+            sum(repo.stargazers_count for repo in target_discovered.values()),
+        ),
+        matched_discovered_stars_delta=sum(
+            target_discovered[key].stargazers_count - source_discovered[key].stargazers_count
+            for key in common_discovered
+        ),
+        added_repositories_stars=sum(
+            target_repositories[key].stargazers_count
+            for key in target_repositories.keys() - source_repositories.keys()
+        ),
+        removed_repositories_stars=sum(
+            source_repositories[key].stargazers_count
+            for key in source_repositories.keys() - target_repositories.keys()
+        ),
+    )
+
     return RunComparison(
         from_run=source.run,
         to_run=target.run,
         repositories_added=repositories_added,
         repositories_removed=repositories_removed,
         relationship_changes=changes,
+        star_counts=star_counts,
     )
 
 
