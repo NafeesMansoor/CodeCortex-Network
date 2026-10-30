@@ -1,0 +1,2 @@
+"""CodeCortex Network initial scaffold."""
+
