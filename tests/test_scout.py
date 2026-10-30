@@ -151,6 +151,24 @@ class FakeContentsClient:
     async def put(self, path: str, body: dict):
         return await self.request("PUT", path, json=body)
 
+    async def get(self, path: str, params=None):
+        del params
+        if path.endswith("/git/ref/heads/main"):
+            return {"object": {"sha": "commit-sha"}}
+        if path.endswith("/git/commits/commit-sha"):
+            return {"tree": {"sha": "tree-sha"}}
+        if path.endswith("/git/trees/tree-sha"):
+            prefix = "/repos/owner/data/contents/"
+            return {
+                "truncated": False,
+                "tree": [
+                    {"path": item.removeprefix(prefix), "type": "blob"}
+                    for item in self.files
+                    if item.startswith(prefix)
+                ],
+            }
+        raise AssertionError(f"Unexpected GitHub API path: {path}")
+
 
 @pytest.mark.asyncio
 async def test_github_snapshot_store_round_trips_versioned_run_and_latest_pointer() -> None:
@@ -167,3 +185,25 @@ async def test_github_snapshot_store_round_trips_versioned_run_and_latest_pointe
     pointer_path = "/repos/owner/data/contents/latest.json"
     pointer_raw = base64.b64decode(github.files[pointer_path][0]).decode()
     assert json.loads(pointer_raw)["run_id"] == result.run.id
+
+
+@pytest.mark.asyncio
+async def test_github_snapshot_store_lists_and_loads_a_bounded_history_page() -> None:
+    github = FakeContentsClient()
+    store = GitHubSnapshotStore(github, "owner/data", "main")  # type: ignore[arg-type]
+    scout = GitHubScout(Settings(seed_repository="owner/seed"), FakeGitHub())  # type: ignore[arg-type]
+    first = await scout.run()
+    second = await scout.run()
+    await store.save(first)
+    await store.save(second)
+
+    page = await store.list_runs(offset=0, limit=1)
+    next_page = await store.list_runs(offset=1, limit=1)
+
+    assert page.total == next_page.total == 2
+    assert len(page.items) == len(next_page.items) == 1
+    assert {page.items[0].run.id, next_page.items[0].run.id} == {
+        first.run.id,
+        second.run.id,
+    }
+    assert (await store.load_run(first.run.id)) == first

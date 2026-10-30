@@ -4,7 +4,7 @@ CodeCortex Network (CCN) is an early-stage service for discovering repositories 
 
 ## First milestone (implemented)
 
-- FastAPI endpoints: `GET /health`, `GET /status`, `POST /scout/run`, `GET /scout/latest`, and read-only paginated `GET /repositories`, `/relationships`, and `/evidence` routes over the latest snapshot.
+- FastAPI endpoints: `GET /health`, `GET /status`, `POST /scout/run`, `GET /scout/latest`, paginated browse routes for `/repositories`, `/relationships`, and `/evidence`, plus persisted history at `GET /runs`, `GET /runs/{run_id}`, and directional comparisons at `GET /runs/{run_id}/compare?to_run_id=...`.
 - Typed repository, evidence, relationship, and agent-run models.
 - A bounded, read-only GitHub Scout. It fetches the configured seed repository, optionally collects a bounded page of direct forks, then searches at most the configured number of its topics. Repositories are deduplicated case-insensitively and the total result count stays within its configured cap.
 - Evidence records retain the source URL, collection time, source type, and original GitHub API payload.
@@ -12,7 +12,7 @@ CodeCortex Network (CCN) is an early-stage service for discovering repositories 
 - Optional durable storage as versioned JSON run files in a dedicated GitHub repository, with `latest.json` updated using optimistic concurrency.
 - Pytest suite, Ruff lint configuration, and GitHub Actions CI.
 
-When `CCN_STORAGE_REPOSITORY` is unset, the API keeps the latest result in process memory; it is lost on restart and is not shared across workers. For durable storage, configure a dedicated private GitHub repository and give `GITHUB_TOKEN` Contents read/write access to it. Each completed run is saved as a versioned JSON file, and a small pointer identifies the latest run. Browse endpoints filter and paginate the latest loaded snapshot in memory; they do not provide indexed graph queries. Scheduling, richer graph expansion, and production deployment are planned.
+When `CCN_STORAGE_REPOSITORY` is unset, the API keeps the latest result in process memory; it is lost on restart and is not shared across workers. For durable storage, configure a dedicated private GitHub repository and give `GITHUB_TOKEN` Contents read/write access to it. Each completed run is saved as a versioned JSON file, and a small pointer identifies the latest run. Latest-snapshot browse routes filter in-memory data; persisted history routes read from the GitHub repository. These are bounded file-based queries, not indexed graph queries. Scheduling, richer graph expansion, and production deployment are planned.
 
 ## Run locally
 

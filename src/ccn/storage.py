@@ -4,7 +4,7 @@ from typing import Any
 from urllib.parse import quote
 
 from ccn.github import GitHubAPIError, GitHubClient
-from ccn.models import ScoutResult
+from ccn.models import RunHistoryItem, RunHistoryPage, ScoutResult
 
 
 class GitHubSnapshotStore:
@@ -26,6 +26,39 @@ class GitHubSnapshotStore:
         if snapshot is None:
             raise ValueError("GitHub snapshot pointer refers to a missing run")
         return ScoutResult.model_validate(snapshot)
+
+    async def list_runs(self, offset: int, limit: int) -> RunHistoryPage:
+        paths = sorted(await self._run_paths(), reverse=True)
+        selected_paths = paths[offset : offset + limit]
+        run_ids = [self._run_id_from_path(path) for path in selected_paths]
+        results = await self.load_runs(run_ids, paths=selected_paths)
+        items = [
+            RunHistoryItem(run=results[run_id].run, run_file=path)
+            for run_id, path in zip(run_ids, selected_paths, strict=True)
+            if run_id in results
+        ]
+        return RunHistoryPage(items=items, total=len(paths), offset=offset, limit=limit)
+
+    async def load_run(self, run_id: str) -> ScoutResult | None:
+        results = await self.load_runs([run_id])
+        return results.get(run_id)
+
+    async def load_runs(
+        self, run_ids: list[str], paths: list[str] | None = None
+    ) -> dict[str, ScoutResult]:
+        if paths is None:
+            all_paths = await self._run_paths()
+            requested = set(run_ids)
+            paths = [path for path in all_paths if self._run_id_from_path(path) in requested]
+        results: dict[str, ScoutResult] = {}
+        for path in paths:
+            run_id = self._run_id_from_path(path)
+            if run_id not in run_ids:
+                continue
+            snapshot, _ = await self._read(path)
+            if snapshot is not None:
+                results[run_id] = ScoutResult.model_validate(snapshot)
+        return results
 
     async def save(self, result: ScoutResult) -> None:
         run_path = f"runs/{result.run.started_at:%Y/%m}/{result.run.id}.json"
@@ -83,6 +116,43 @@ class GitHubSnapshotStore:
         if not isinstance(payload, dict):
             raise ValueError(f"GitHub snapshot file {path} must contain a JSON object")
         return payload, sha
+
+    async def _run_paths(self) -> list[str]:
+        repository_path = quote(self.repository, safe="/")
+        branch = f"heads/{quote(self.branch, safe='')}"
+        reference = await self.client.get(f"/repos/{repository_path}/git/ref/{branch}")
+        reference_object = reference.get("object") if isinstance(reference, dict) else None
+        commit_sha = reference_object.get("sha") if isinstance(reference_object, dict) else None
+        if not isinstance(commit_sha, str):
+            raise ValueError("GitHub snapshot branch reference is invalid")
+        commit = await self.client.get(f"/repos/{repository_path}/git/commits/{commit_sha}")
+        commit_tree = commit.get("tree") if isinstance(commit, dict) else None
+        tree_sha = commit_tree.get("sha") if isinstance(commit_tree, dict) else None
+        if not isinstance(tree_sha, str):
+            raise ValueError("GitHub snapshot commit tree is invalid")
+        tree = await self.client.get(
+            f"/repos/{repository_path}/git/trees/{tree_sha}", {"recursive": "1"}
+        )
+        if not isinstance(tree, dict):
+            raise ValueError("GitHub snapshot repository tree is invalid")
+        if tree.get("truncated"):
+            raise ValueError("GitHub snapshot repository tree is truncated")
+        entries = tree.get("tree")
+        if not isinstance(entries, list):
+            raise ValueError("GitHub snapshot repository tree is invalid")
+        return [
+            entry["path"]
+            for entry in entries
+            if isinstance(entry, dict)
+            and entry.get("type") == "blob"
+            and isinstance(entry.get("path"), str)
+            and entry["path"].startswith("runs/")
+            and entry["path"].endswith(".json")
+        ]
+
+    @staticmethod
+    def _run_id_from_path(path: str) -> str:
+        return path.rsplit("/", 1)[-1].removesuffix(".json")
 
     def _contents_path(self, path: str) -> str:
         encoded_path = quote(path, safe="/")

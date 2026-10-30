@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from uuid import UUID
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query
@@ -8,9 +9,14 @@ from ccn.config import get_settings
 from ccn.github import GitHubAPIError, GitHubClient
 from ccn.models import (
     EvidencePage,
+    Relationship,
+    RelationshipChange,
+    RelationshipChangeKind,
     RelationshipKind,
     RelationshipPage,
     RepositoryPage,
+    RunComparison,
+    RunHistoryPage,
     ScoutResult,
 )
 from ccn.scout import GitHubScout
@@ -59,6 +65,68 @@ def _latest_result() -> ScoutResult:
     if not isinstance(result, ScoutResult):
         raise HTTPException(status_code=404, detail="No Scout run has completed")
     return result
+
+
+def _snapshot_store() -> GitHubSnapshotStore:
+    store = state.get("store")
+    if not isinstance(store, GitHubSnapshotStore):
+        raise HTTPException(status_code=503, detail="GitHub snapshot storage is not configured")
+    return store
+
+
+def _relationship_key(relationship: Relationship) -> tuple[str, str, str]:
+    return (
+        relationship.source_repository.casefold(),
+        relationship.target_repository.casefold(),
+        relationship.kind.value,
+    )
+
+
+def _relationship_signature(relationship: Relationship) -> tuple[str, ...]:
+    # Evidence IDs change on each run; shared topics define semantic edge changes.
+    return tuple(sorted(topic.casefold() for topic in relationship.shared_topics))
+
+
+def _compare_runs(source: ScoutResult, target: ScoutResult) -> RunComparison:
+    source_repositories = {repo.full_name.casefold(): repo for repo in source.repositories}
+    target_repositories = {repo.full_name.casefold(): repo for repo in target.repositories}
+    repositories_added = [
+        target_repositories[key]
+        for key in sorted(target_repositories.keys() - source_repositories.keys())
+    ]
+    repositories_removed = [
+        source_repositories[key]
+        for key in sorted(source_repositories.keys() - target_repositories.keys())
+    ]
+
+    source_relationships = {
+        _relationship_key(item): item for item in source.relationships
+    }
+    target_relationships = {
+        _relationship_key(item): item for item in target.relationships
+    }
+    changes: list[RelationshipChange] = []
+    for key in sorted(source_relationships.keys() | target_relationships.keys()):
+        before = source_relationships.get(key)
+        after = target_relationships.get(key)
+        if before is None:
+            changes.append(RelationshipChange(change=RelationshipChangeKind.ADDED, after=after))
+        elif after is None:
+            changes.append(RelationshipChange(change=RelationshipChangeKind.REMOVED, before=before))
+        elif _relationship_signature(before) != _relationship_signature(after):
+            changes.append(
+                RelationshipChange(
+                    change=RelationshipChangeKind.UPDATED, before=before, after=after
+                )
+            )
+
+    return RunComparison(
+        from_run=source.run,
+        to_run=target.run,
+        repositories_added=repositories_added,
+        repositories_removed=repositories_removed,
+        relationship_changes=changes,
+    )
 
 
 @app.get("/health")
@@ -182,4 +250,44 @@ async def evidence(
     return EvidencePage(
         items=records[offset : offset + limit], total=len(records), offset=offset, limit=limit
     )
+
+
+@app.get("/runs", response_model=RunHistoryPage)
+async def runs(
+    offset: int = Query(default=0, ge=0, le=10000),
+    limit: int = Query(default=10, ge=1, le=20),
+) -> RunHistoryPage:
+    store = _snapshot_store()
+    try:
+        return await store.list_runs(offset, limit)
+    except (GitHubAPIError, httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/runs/{run_id}", response_model=ScoutResult)
+async def run_detail(run_id: UUID) -> ScoutResult:
+    store = _snapshot_store()
+    try:
+        result = await store.load_run(str(run_id))
+    except (GitHubAPIError, httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Scout run not found")
+    return result
+
+
+@app.get("/runs/{from_run_id}/compare", response_model=RunComparison)
+async def compare_runs(from_run_id: UUID, to_run_id: UUID) -> RunComparison:
+    store = _snapshot_store()
+    source_id = str(from_run_id)
+    target_id = str(to_run_id)
+    try:
+        results = await store.load_runs([source_id, target_id])
+    except (GitHubAPIError, httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    source = results.get(source_id)
+    target = results.get(target_id)
+    if source is None or target is None:
+        raise HTTPException(status_code=404, detail="One or both Scout runs were not found")
+    return _compare_runs(source, target)
 

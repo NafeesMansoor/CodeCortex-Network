@@ -1,14 +1,21 @@
 from fastapi.testclient import TestClient
 
 from ccn.main import app, state
-from ccn.models import ScoutResult
+from ccn.models import (
+    Relationship,
+    RelationshipKind,
+    RunHistoryItem,
+    RunHistoryPage,
+    ScoutResult,
+)
+from ccn.storage import GitHubSnapshotStore
 
 
 def _sample_result() -> ScoutResult:
     return ScoutResult.model_validate(
         {
             "run": {
-                "id": "run-1",
+                "id": "00000000-0000-0000-0000-000000000001",
                 "status": "succeeded",
                 "started_at": "2026-01-01T00:00:00Z",
                 "finished_at": "2026-01-01T00:01:00Z",
@@ -145,4 +152,96 @@ def test_browse_endpoints_not_found_without_snapshot() -> None:
     with TestClient(app) as client:
         for path in ("/repositories", "/relationships", "/evidence"):
             assert client.get(path).status_code == 404
+
+
+def test_run_history_and_comparison_endpoints(monkeypatch) -> None:
+    source = _sample_result()
+    source.relationships.append(
+        Relationship(
+            source_repository="other/removed",
+            target_repository="owner/seed",
+            kind=RelationshipKind.FORK_OF,
+        )
+    )
+    target = source.model_copy(deep=True)
+    target.run = target.run.model_copy(
+        update={"id": "00000000-0000-0000-0000-000000000002"}
+    )
+    target.repositories = [
+        source.repositories[0],
+        source.repositories[1].model_copy(
+            update={"full_name": "other/new-agent", "id": 3}
+        ),
+    ]
+    target.relationships = [
+        source.relationships[0],
+        source.relationships[1].model_copy(update={"shared_topics": ["agents", "tools"]}),
+        Relationship(
+            source_repository="other/new-agent",
+            target_repository="owner/seed",
+            kind=RelationshipKind.FORK_OF,
+            evidence_ids=["ev-new"],
+        ),
+    ]
+    snapshots = {source.run.id: source, target.run.id: target}
+    store = GitHubSnapshotStore(None, "owner/data")  # type: ignore[arg-type]
+
+    async def fake_list_runs(self, offset: int, limit: int) -> RunHistoryPage:
+        del self
+        all_runs = [source.run, target.run]
+        return RunHistoryPage(
+            items=[
+                RunHistoryItem(run=run, run_file=f"runs/{run.id}.json")
+                for run in all_runs[offset : offset + limit]
+            ],
+            total=len(all_runs),
+            offset=offset,
+            limit=limit,
+        )
+
+    async def fake_load_run(self, run_id: str) -> ScoutResult | None:
+        del self
+        return snapshots.get(run_id)
+
+    async def fake_load_runs(self, run_ids: list[str]) -> dict[str, ScoutResult]:
+        del self
+        return {run_id: snapshots[run_id] for run_id in run_ids if run_id in snapshots}
+
+    monkeypatch.setattr(GitHubSnapshotStore, "list_runs", fake_list_runs)
+    monkeypatch.setattr(GitHubSnapshotStore, "load_run", fake_load_run)
+    monkeypatch.setattr(GitHubSnapshotStore, "load_runs", fake_load_runs)
+
+    with TestClient(app) as client:
+        state["store"] = store
+        history = client.get("/runs", params={"offset": 1, "limit": 1})
+        assert history.status_code == 200
+        assert history.json()["total"] == 2
+        assert history.json()["items"][0]["run"]["id"] == target.run.id
+
+        detail = client.get(f"/runs/{source.run.id}")
+        assert detail.status_code == 200
+        assert detail.json()["run"]["id"] == source.run.id
+
+        comparison = client.get(
+            f"/runs/{source.run.id}/compare", params={"to_run_id": target.run.id}
+        )
+        assert comparison.status_code == 200
+        body = comparison.json()
+        assert body["from_run"]["id"] == source.run.id
+        assert body["to_run"]["id"] == target.run.id
+        assert [item["full_name"] for item in body["repositories_added"]] == [
+            "other/new-agent"
+        ]
+        assert [item["full_name"] for item in body["repositories_removed"]] == [
+            "other/agent-kit"
+        ]
+        changes = {item["change"]: item for item in body["relationship_changes"]}
+        assert set(changes) == {"added", "removed", "updated"}
+        assert changes["updated"]["after"]["shared_topics"] == ["agents", "tools"]
+
+
+def test_history_requires_github_snapshot_storage() -> None:
+    with TestClient(app) as client:
+        assert client.get("/runs").status_code == 503
+        assert client.get("/runs", params={"limit": 21}).status_code == 422
 

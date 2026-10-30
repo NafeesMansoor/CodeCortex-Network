@@ -94,3 +94,35 @@ class RelationshipPage(BaseModel):
     total: int
     offset: int
     limit: int
+
+
+class RunHistoryItem(BaseModel):
+    run: AgentRun
+    run_file: str
+
+
+class RunHistoryPage(BaseModel):
+    items: list[RunHistoryItem]
+    total: int
+    offset: int
+    limit: int
+
+
+class RelationshipChangeKind(StrEnum):
+    ADDED = "added"
+    REMOVED = "removed"
+    UPDATED = "updated"
+
+
+class RelationshipChange(BaseModel):
+    change: RelationshipChangeKind
+    before: Relationship | None = None
+    after: Relationship | None = None
+
+
+class RunComparison(BaseModel):
+    from_run: AgentRun
+    to_run: AgentRun
+    repositories_added: list[Repository]
+    repositories_removed: list[Repository]
+    relationship_changes: list[RelationshipChange]

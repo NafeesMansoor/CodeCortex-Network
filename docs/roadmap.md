@@ -14,7 +14,8 @@
 - [x] Persist each Scout run, repository, evidence payload, and relationship as a versioned JSON snapshot in a configurable GitHub repository.
 - [x] Restore the latest completed run at API startup and update the latest pointer with optimistic concurrency.
 - [x] Add read-only paginated browse endpoints for repositories, relationships, and evidence in the latest snapshot.
-- [ ] Add indexed graph queries, incremental record-level updates, historical run browsing, and explicit retention policies.
+- [x] Add bounded paginated persisted run history, run detail, and directional run-to-run comparisons.
+- [ ] Add indexed graph queries, incremental record-level updates, and explicit retention policies.
 
 ## Milestone 3 — Broader discovery (partially implemented)
 
@@ -25,7 +26,7 @@
 
 ## Milestone 4 — Operability (planned)
 
-- Add background scheduling, run history, structured metrics, and deployment guidance.
+- Add background scheduling, structured metrics, and deployment guidance.
 - Add service-level access controls and operational hardening.
 
 No deployment or paid resource provisioning is part of the current implementation.
