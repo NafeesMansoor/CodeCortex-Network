@@ -66,3 +66,24 @@ class ScoutResult(BaseModel):
     repositories: list[Repository]
     evidence: list[Evidence]
     relationships: list[Relationship]
+
+
+class RepositoryPage(BaseModel):
+    items: list[Repository]
+    total: int
+    offset: int
+    limit: int
+
+
+class EvidencePage(BaseModel):
+    items: list[Evidence]
+    total: int
+    offset: int
+    limit: int
+
+
+class RelationshipPage(BaseModel):
+    items: list[Relationship]
+    total: int
+    offset: int
+    limit: int

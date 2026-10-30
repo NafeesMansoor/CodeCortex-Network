@@ -2,7 +2,7 @@
 
 ## Implemented in the initial milestone
 
-The service is a Python 3.11+ FastAPI application. `ccn.main` exposes health/status routes and runs an on-demand Scout. API responses use Pydantic models defined in `ccn.models`.
+The service is a Python 3.11+ FastAPI application. `ccn.main` exposes health/status routes, runs an on-demand Scout, and provides read-only routes for browsing the latest snapshot. API responses use Pydantic models defined in `ccn.models`.
 
 `GitHubScout` fetches one configured seed repository, then performs at most `CCN_MAX_SEARCH_QUERIES` searches, one per seed topic. The total unique result set, including the seed, is capped by `CCN_MAX_REPOSITORIES`. Repositories are deduplicated by lowercase `owner/name`. Search results are ranked by stars by GitHub; this is a discovery convenience, not a quality score.
 
@@ -17,6 +17,8 @@ When `CCN_STORAGE_REPOSITORY` is set, every successful run is written to a uniqu
 At startup the API reads `latest.json` and loads the referenced snapshot. A missing pointer means no run has been stored. Storage errors are exposed in `/status`; a run that cannot be persisted returns an error instead of reporting success. The configured GitHub token must have Contents read/write permission on the data repository. Keep that repository private when collected evidence should not be public.
 
 The snapshot store is append-oriented and does not provide indexed graph queries or transactions across the run file and latest pointer. A crash after writing a run file but before updating the pointer can leave an unreferenced snapshot, while the prior latest snapshot remains usable. Without `CCN_STORAGE_REPOSITORY`, the latest result is held in process memory and is lost on restart. There is no background queue, scheduled execution, or cross-worker API cache. Scout runs are triggered manually through `POST /scout/run`.
+
+`GET /repositories`, `GET /relationships`, and `GET /evidence` return paginated records from the latest loaded run only. They accept exact case-insensitive filters for repository language/topic, relationship endpoint/kind, and evidence repository/source; repository search (`q`) matches names and descriptions. The default page size is 50 and the maximum is 100. These routes filter the in-memory snapshot and are not indexed or backed by historical run querying. They return 404 until a latest run is available. `GET /scout/latest` remains the way to retrieve the complete snapshot.
 
 ## Planned
 

@@ -4,7 +4,7 @@ CodeCortex Network (CCN) is an early-stage service for discovering repositories 
 
 ## First milestone (implemented)
 
-- FastAPI endpoints: `GET /health`, `GET /status`, `POST /scout/run`, and `GET /scout/latest`.
+- FastAPI endpoints: `GET /health`, `GET /status`, `POST /scout/run`, `GET /scout/latest`, and read-only paginated `GET /repositories`, `/relationships`, and `/evidence` routes over the latest snapshot.
 - Typed repository, evidence, relationship, and agent-run models.
 - A bounded, read-only GitHub Scout. It fetches the configured seed repository, searches at most the configured number of its topics, deduplicates repositories case-insensitively, and caps the result count.
 - Evidence records retain the source URL, collection time, source type, and original GitHub API payload.
@@ -12,7 +12,7 @@ CodeCortex Network (CCN) is an early-stage service for discovering repositories 
 - Optional durable storage as versioned JSON run files in a dedicated GitHub repository, with `latest.json` updated using optimistic concurrency.
 - Pytest suite, Ruff lint configuration, and GitHub Actions CI.
 
-When `CCN_STORAGE_REPOSITORY` is unset, the API keeps the latest result in process memory; it is lost on restart and is not shared across workers. For durable storage, configure a dedicated private GitHub repository and give `GITHUB_TOKEN` Contents read/write access to it. Each completed run is saved as a versioned JSON file, and a small pointer identifies the latest run. This is an append-oriented snapshot store, not a database with indexed graph queries. Scheduling, richer graph expansion, and production deployment are planned.
+When `CCN_STORAGE_REPOSITORY` is unset, the API keeps the latest result in process memory; it is lost on restart and is not shared across workers. For durable storage, configure a dedicated private GitHub repository and give `GITHUB_TOKEN` Contents read/write access to it. Each completed run is saved as a versioned JSON file, and a small pointer identifies the latest run. Browse endpoints filter and paginate the latest loaded snapshot in memory; they do not provide indexed graph queries. Scheduling, richer graph expansion, and production deployment are planned.
 
 ## Run locally
 
