@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     requests_per_minute: int = Field(default=30, ge=1, le=60)
     request_timeout_seconds: float = Field(default=10, gt=0, le=60)
     github_api_url: str = "https://api.github.com"
+    storage_repository: str | None = None
+    storage_branch: str = "main"
 
     @field_validator("seed_repository")
     @classmethod
@@ -21,6 +23,13 @@ class Settings(BaseSettings):
         if len(value.split("/")) != 2 or not all(value.split("/")):
             raise ValueError("seed_repository must use owner/name format")
         return value.strip("/")
+
+    @field_validator("storage_repository")
+    @classmethod
+    def validate_storage_repository(cls, value: str | None) -> str | None:
+        if value is not None and (len(value.split("/")) != 2 or not all(value.split("/"))):
+            raise ValueError("storage_repository must use owner/name format")
+        return value.strip("/") if value else value
 
 
 @lru_cache

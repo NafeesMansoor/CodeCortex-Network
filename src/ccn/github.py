@@ -11,6 +11,10 @@ import httpx
 class GitHubAPIError(RuntimeError):
     """GitHub rejected or could not fulfill a request."""
 
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
 
 class RequestLimiter:
     """A sliding-window limiter shared by a running API process."""
@@ -46,13 +50,23 @@ class GitHubClient:
     async def close(self) -> None:
         await self.client.aclose()
 
-    async def get(self, path: str, params: dict[str, str] | None = None) -> Any:
+    async def request(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
+        allow_not_found: bool = False,
+        headers: dict[str, str] | None = None,
+    ) -> Any:
         async def request() -> httpx.Response:
             await self.hourly_limiter.wait()
             await self.limiter.wait()
             if path.startswith("/search/"):
                 await self.search_limiter.wait()
-            return await self.client.get(path, params=params)
+            return await self.client.request(
+                method, path, params=params, json=json, headers=headers
+            )
 
         response = await request()
         if response.status_code in (403, 429):
@@ -67,7 +81,9 @@ class GitHubClient:
                 or "rate limit" in message
             )
             if not is_rate_limited:
-                raise GitHubAPIError(f"GitHub API returned {response.status_code} for {path}")
+                raise GitHubAPIError(
+                    f"GitHub API returned {response.status_code} for {path}", response.status_code
+                )
             if retry_after:
                 delay = max(0.0, float(retry_after))
             elif remaining == "0" and reset:
@@ -77,8 +93,18 @@ class GitHubClient:
             await asyncio.sleep(delay)
             response = await request()
         if response.status_code >= 400:
-            raise GitHubAPIError(f"GitHub API returned {response.status_code} for {path}")
+            if allow_not_found and response.status_code == 404:
+                return None
+            raise GitHubAPIError(
+                f"GitHub API returned {response.status_code} for {path}", response.status_code
+            )
         return response.json()
+
+    async def get(self, path: str, params: dict[str, str] | None = None) -> Any:
+        return await self.request("GET", path, params=params)
+
+    async def put(self, path: str, body: dict[str, Any]) -> Any:
+        return await self.request("PUT", path, json=body)
 
     async def repository(self, full_name: str) -> dict[str, Any]:
         return await self.get(f"/repos/{quote(full_name, safe='/')}")

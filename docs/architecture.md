@@ -12,11 +12,15 @@ Each seed or discovered repository has an Evidence record with the GitHub source
 
 ## Storage and runtime limits
 
-The latest completed result is held in process memory. There is no database, durable evidence archive, run history, background queue, scheduled execution, or cross-worker synchronization. `/status` reports the current process's latest result only. Scout runs are triggered manually through `POST /scout/run`.
+When `CCN_STORAGE_REPOSITORY` is set, every successful run is written to a unique JSON file under `runs/YYYY/MM/` in that repository. The file contains the typed run result, repositories, source evidence payloads, and relationships. The store then updates `latest.json` with the new run path. Updating this pointer uses the current file SHA and retries conflicts, so concurrent writers don't silently overwrite each other's pointer update. The repository's Git history provides version history and restores.
+
+At startup the API reads `latest.json` and loads the referenced snapshot. A missing pointer means no run has been stored. Storage errors are exposed in `/status`; a run that cannot be persisted returns an error instead of reporting success. The configured GitHub token must have Contents read/write permission on the data repository. Keep that repository private when collected evidence should not be public.
+
+The snapshot store is append-oriented and does not provide indexed graph queries or transactions across the run file and latest pointer. A crash after writing a run file but before updating the pointer can leave an unreferenced snapshot, while the prior latest snapshot remains usable. Without `CCN_STORAGE_REPOSITORY`, the latest result is held in process memory and is lost on restart. There is no background queue, scheduled execution, or cross-worker API cache. Scout runs are triggered manually through `POST /scout/run`.
 
 ## Planned
 
-- Durable repository, evidence, relationship, and run storage with migrations.
+- Indexed graph queries and normalized storage for larger datasets.
 - Incremental scans, scheduled runs, and explicit run lifecycle/status tracking for failures.
 - Additional discovery sources and relationship types with provenance.
 - Authentication, authorization, operational metrics, and deployment configuration.

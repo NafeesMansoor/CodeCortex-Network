@@ -9,11 +9,11 @@
 - Case-insensitive deduplication and retained GitHub response evidence.
 - Pytest, Ruff, and GitHub Actions CI.
 
-## Milestone 2 — Durable graph (planned)
+## Milestone 2 — GitHub snapshot persistence (partially implemented)
 
-- Persist Scout runs, repositories, evidence, and relationships.
-- Add migrations, incremental updates, and query endpoints.
-- Define retention and provenance policies.
+- [x] Persist each Scout run, repository, evidence payload, and relationship as a versioned JSON snapshot in a configurable GitHub repository.
+- [x] Restore the latest completed run at API startup and update the latest pointer with optimistic concurrency.
+- [ ] Add indexed graph queries, incremental record-level updates, and explicit retention policies.
 
 ## Milestone 3 — Broader discovery (planned)
 
